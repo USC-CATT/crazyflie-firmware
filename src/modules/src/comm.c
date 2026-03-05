@@ -40,6 +40,7 @@
 #include "platformservice.h"
 #include "syslink.h"
 #include "crtp_localization_service.h"
+#include "crtp_motor_command_raw.h"
 
 static bool isInit;
 
@@ -63,6 +64,7 @@ void commInit(void)
   logInit();
   paramInit();
   locSrvInit();
+  motorRawInit();
 
   //setup CRTP communication channel
   //TODO: check for USB first and prefer USB over radio
@@ -84,6 +86,7 @@ bool commTest(void)
   pass &= platformserviceTest();
   pass &= consoleTest();
   pass &= paramTest();
+  pass &= motorRawTest();
   
   return pass;
 }
