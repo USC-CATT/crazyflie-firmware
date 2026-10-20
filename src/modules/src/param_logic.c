@@ -57,8 +57,6 @@ static const uint8_t typeLength[] = {
 #define CMD_GET_NEXT 1
 #define CMD_GET_CRC 2
 
-#define CMD_GET_ITEM    0 // original version: up to 255 entries
-#define CMD_GET_INFO    1 // original version: up to 255 entries
 #define CMD_GET_ITEM_V2 2 // version 2: up to 16k entries
 #define CMD_GET_INFO_V2 3 // version 2: up to 16k entries
 
@@ -278,23 +276,6 @@ void paramTOCProcess(CRTPPacket *p, int command)
 
   switch (command)
   {
-    case CMD_GET_INFO: //Get info packet about the param implementation (obsolete)
-      DEBUG_PRINT("Param API V1 not supported anymore!\n");
-      ptr = 0;
-      group = "";
-      p->header = CRTP_HEADER(CRTP_PORT_PARAM, TOC_CH);
-      p->size = 4;
-      p->data[0] = CMD_GET_INFO;
-      p->data[1] = 0; // Param count
-      crtpSendPacketBlock(p);
-      break;
-    case CMD_GET_ITEM:  //Get param variable (obsolete)
-      DEBUG_PRINT("Param API V1 not supported anymore!\n");
-      p->header=CRTP_HEADER(CRTP_PORT_PARAM, TOC_CH);
-      p->data[0]=CMD_GET_ITEM;
-      p->size=1;
-      crtpSendPacketBlock(p);
-      break;
     case CMD_GET_INFO_V2: //Get info packet about the param implementation
       ptr = 0;
       group = "";
@@ -716,14 +697,30 @@ static void generateStorageKey(const uint16_t index, char key[KEY_LEN])
   strcat(key, name);
 }
 
+static bool paramIsPersistent(int index)
+{
+  return (params[index].extended_type & (PARAM_PERSISTENT >> 8)) != 0;
+}
+
+bool paramPersistentStoreByVarId(paramVarId_t varid)
+{
+  ASSERT(PARAM_VARID_IS_VALID(varid));
+
+  if (!paramIsPersistent(varid.index)) {
+    return false;
+  }
+
+  char key[KEY_LEN] = {0};
+  generateStorageKey(varid.index, key);
+
+  return storageStore(key, params[varid.index].address, paramGetLen(varid.index));
+}
+
 void paramPersistentStore(CRTPPacket *p)
 {
-  int index;
   uint16_t id;
-  bool result = true;
-
   memcpy(&id, &p->data[1], 2);
-  index = variableGetIndex(id);
+  int index = variableGetIndex(id);
 
   if (index < 0) {
     p->data[3] = ENOENT;
@@ -732,12 +729,10 @@ void paramPersistentStore(CRTPPacket *p)
     return;
   }
 
-  char key[KEY_LEN] = {0};
-  generateStorageKey(index, key);
+  paramVarId_t varid = { .id = id, .index = (uint16_t)index };
+  bool result = paramPersistentStoreByVarId(varid);
 
-  result = storageStore(key, params[index].address, paramGetLen(index));
-
-  p->data[3] = result ? 0: ENOENT;
+  p->data[3] = result ? 0 : ENOENT;
   p->size = 4;
   crtpSendPacketBlock(p);
 }
@@ -885,7 +880,7 @@ static bool persistentParamFromStorage(const char *key, void *buffer, size_t len
   char *completeName = (char *) key + strlen(PERSISTENT_PREFIX_STRING);
   paramVarId_t varId = paramGetVarIdFromComplete(completeName);
 
-  if (PARAM_VARID_IS_VALID(varId)) {
+  if (PARAM_VARID_IS_VALID(varId) && paramIsPersistent(varId.index)) {
     paramSet(varId.index, buffer);
   }
 
